@@ -166,7 +166,7 @@ summary_data = {
 }
 
 # Append the summary row to the DataFrame
-selected_courses_data = selected_courses_data.append(summary_data, ignore_index=True)
+selected_courses_data = selected_courses_data.concat(summary_data, ignore_index=True)
 
 # Adjust the columns to display the weighted utility
 selected_courses_data = selected_courses_data[['SectionID', 'Course_Name', 'Instructor', 'Days', 'Time', 'Price', 'Credits', 'Weighted Utility']]
