@@ -3,3 +3,5 @@ numpy
 pandas
 pydeck
 streamlit
+st-gsheets-connection
+pulp
