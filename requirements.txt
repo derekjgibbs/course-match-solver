@@ -5,3 +5,5 @@ pydeck
 streamlit
 st-gsheets-connection
 pulp
+scikit-learn
+xgboost

@@ -37,46 +37,16 @@ st.dataframe(course_data)
 credit_limit = 5.25 # Will replace this with user input
 credit_limit = st.number_input("Enter your credit limit", min_value=0.0, max_value=7.0, value=4.0, step=0.25, format="%.2f")
 
-budget = 4400  # For a first-year student
 student_year = st.selectbox("Select your year", options=["1st Year", "2nd Year"])
 budget = 4400 if student_year == "1st Year" else 5500  # Adjust based on the selected year
 
+# Initialize an empty DataFrame to store user inputs if it doesn't already exist in session state
+if 'user_utilities' not in st.session_state:
+    st.session_state['user_utilities'] = pd.DataFrame(columns=['Course', 'SectionID', 'Utility'])
+
+
 # Initialize the ILP problem
 problem = LpProblem("Course_Scheduler", LpMaximize)
-
-# Identify class conflicts
-def conflicts(course_a, course_b):
-    # Check if the time slots overlap
-    if course_a['Time'] != course_b['Time']:
-        return False
-
-    # Check if the courses are in the same term or if one is in a semester that overlaps the other's quarter
-    if course_a['Term'] != course_b['Term']:
-        if not ((course_a['Term'] == 'Full' and course_b['Term'] in ['Q1', 'Q2', 'Q3', 'Q4']) or
-                (course_b['Term'] == 'Full' and course_a['Term'] in ['Q1', 'Q2', 'Q3', 'Q4'])):
-            return False
-
-    # Check for day conflicts (M, W, MW, T, R, TR)
-    days_a = set(course_a['Days'])
-    days_b = set(course_b['Days'])
-
-    # Monday and Wednesday
-    if ('M' in days_a and 'M' in days_b) or ('W' in days_a and 'W' in days_b):
-        return True
-    if 'MW' in days_a and ('M' in days_b or 'W' in days_b):
-        return True
-    if 'MW' in days_b and ('M' in days_a or 'W' in days_a):
-        return True
-
-    # Tuesday and Thursday
-    if ('T' in days_a and 'T' in days_b) or ('R' in days_a and 'R' in days_b):
-        return True
-    if 'TR' in days_a and ('T' in days_b or 'R' in days_b):
-        return True
-    if 'TR' in days_b and ('T' in days_a or 'R' in days_a):
-        return True
-
-    return False
 
 # Define binary variables for each course section
 course_vars = {row['SectionID']: LpVariable(f"x_{row['SectionID']}", cat='Binary') for index, row in course_data.iterrows()}
@@ -89,12 +59,52 @@ problem += lpSum([row['Utility'] * row['Credits'] * course_vars[row['SectionID']
 problem += lpSum([row['Price'] * course_vars[row['SectionID']] for index, row in course_data.iterrows()]) <= budget, "BudgetConstraint"
 
 # 2. Conflicts constraint: Classes cannot be at the same time
-for i, course_a in course_data.iterrows():
-    for j, course_b in course_data.iterrows():
-        if i >= j:  # Avoid duplicate pairs and self-comparison
-            continue
-        if conflicts(course_a, course_b):
-            problem += course_vars[course_a['SectionID']] + course_vars[course_b['SectionID']] <= 1, f"Conflict_{i}_{j}"
+
+# Function to determine group IDs
+def get_group_id(row):
+    # Initialize an empty list to hold components of the group ID
+    group_components = []
+    
+    # Add the time slot as the first component
+    group_components.append(row['Time'])
+    
+    # Add term-related components
+    if row['Term'] == 'Full':
+        # Full semester courses conflict with any quarter course in the same time slot
+        group_components.append('Full')
+    else:
+        # Quarter-specific ID
+        group_components.append(row['Term'])
+    
+    # Add day-related components
+    if 'M' in row['Days']:
+        group_components.append('M')
+    if 'W' in row['Days']:
+        group_components.append('W')
+    if 'T' in row['Days']:
+        group_components.append('T')
+    if 'R' in row['Days']:
+        group_components.append('R')
+    
+    # Concatenate all components to form a unique group ID
+    return '_'.join(group_components)
+
+# Apply the function to each row to assign group IDs
+course_data['GroupID'] = course_data.apply(get_group_id, axis=1)
+
+# Initialize a dictionary to hold the courses for each group
+grouped_courses = {}
+
+# Populate the dictionary with courses
+for index, row in course_data.iterrows():
+    group_id = row['GroupID']
+    if group_id not in grouped_courses:
+        grouped_courses[group_id] = []
+    grouped_courses[group_id].append(course_vars[row['SectionID']])
+
+# Create constraints for each group
+for group_id, courses in grouped_courses.items():
+    problem += lpSum(courses) <= 1, f"GroupConstraint_{group_id}"
 
 # 3. Section constraint: Cannot be in more than one of the same section
 # Create a dictionary where each key is a course (Section) and each value is a list of section variables for that course
